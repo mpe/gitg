@@ -1115,3 +1115,30 @@ gitg_repository_parse_head(GitgRepository *repository)
 	return ret;
 }
 
+gboolean
+gitg_repository_get_diff(GitgRepository *self, GitgRevision *revision, GitgRunner *diff_runner)
+{
+	gchar *hash, *gitpath;
+	gboolean rc;
+
+	gitpath = gitg_utils_dot_git_path(gitg_repository_get_path(self));
+	hash = gitg_revision_get_sha1(revision);
+
+	gchar const *argv[] = {
+		"git",
+		"--git-dir",
+		gitpath,
+		"show",
+		"--pretty=format:%s%n%n%b",
+		"--encoding=UTF-8",
+		hash,
+		NULL
+	};
+	
+	rc = gitg_runner_run(diff_runner, argv, NULL);
+
+	g_free(hash);
+	g_free(gitpath);
+
+	return rc;
+}
