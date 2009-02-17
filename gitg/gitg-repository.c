@@ -82,6 +82,7 @@ struct _GitgRepositoryPrivate
 	gint grow_size;
 	
 	gchar **last_args;
+	gboolean first_load_update;
 	guint idle_relane_id;
 };
 
@@ -436,6 +437,58 @@ gitg_repository_class_init(GitgRepositoryClass *klass)
 }
 
 static void
+setup_revision_lanes(GitgRevision *rv, GitgRepository *repository)
+{
+	gint8 mylane = 0;
+	GSList *lanes;
+
+	lanes = gitg_lanes_next(repository->priv->lanes, rv, &mylane);
+	gitg_revision_set_lanes(rv, lanes, mylane);
+}
+
+static void
+insert_fake_revisions(GitgRepository *repository, gchar *current_head)
+{
+	gchar *head, **output, *parent;
+	GitgRevision *uncomted = NULL, *unstaged = NULL;
+
+	head = gitg_repository_parse_head(repository);
+
+	if (g_strcmp0(head, current_head) != 0)
+		return;
+
+	output = gitg_repository_command_with_outputv(repository, NULL, "diff-index", "--cached", current_head, NULL);
+	if (*output) {
+		uncomted = gitg_revision_uncommitted_new(current_head);
+		setup_revision_lanes(uncomted, repository);
+		g_strfreev(output);
+	}
+
+	output = gitg_repository_command_with_outputv(repository, NULL, "diff-files", NULL);
+	if (*output) {
+		if (uncomted)
+			parent = gitg_revision_get_sha1(uncomted);
+		else
+			parent = g_strdup(current_head);
+
+		unstaged = gitg_revision_unstaged_new(parent);
+		setup_revision_lanes(unstaged, repository);
+		g_strfreev(output);
+		g_free(parent);
+	}
+
+	if (unstaged) {
+		gitg_repository_add(repository, unstaged, NULL);
+		gitg_revision_unref(unstaged);
+	}
+
+	if (uncomted) {
+		gitg_repository_add(repository, uncomted, NULL);
+		gitg_revision_unref(uncomted);
+	}
+}
+
+static void
 on_loader_update(GitgRunner *object, gchar **buffer, GitgRepository *self)
 {
 	gchar *line;
@@ -452,22 +505,23 @@ on_loader_update(GitgRunner *object, gchar **buffer, GitgRepository *self)
 			continue;
 		}
 
+		if (self->priv->size == 0)
+			gitg_lanes_reset(self->priv->lanes);
+
+		if (self->priv->first_load_update) {
+			insert_fake_revisions(self, components[0]);
+			self->priv->first_load_update = FALSE;
+		}
+
 		/* components -> [hash, author, subject, parents ([1 2 3]), timestamp[, leftright]] */
 		gint64 timestamp = g_ascii_strtoll(components[4], NULL, 0);
 	
 		GitgRevision *rv = gitg_revision_new(components[0], components[1], components[2], components[3], timestamp);
-		GSList *lanes;
 		
 		if (len > 5 && strlen(components[5]) == 1 && strchr("<>-^", *components[5]) != NULL)
 			gitg_revision_set_sign(rv, *components[5]);
 
-		gint8 mylane = 0;
-		
-		if (self->priv->size == 0)
-			gitg_lanes_reset(self->priv->lanes);
-
-		lanes = gitg_lanes_next(self->priv->lanes, rv, &mylane);
-		gitg_revision_set_lanes(rv, lanes, mylane);
+		setup_revision_lanes(rv, self);
 
 		gitg_repository_add(self, rv, NULL);
 
@@ -671,6 +725,8 @@ static gboolean
 reload_revisions(GitgRepository *repository, GError **error)
 {
 	g_signal_emit(repository, repository_signals[LOAD], 0);
+
+	repository->priv->first_load_update = TRUE;
 
 	return gitg_repository_run_command(repository, repository->priv->loader, (gchar const **)repository->priv->last_args, error);
 }
@@ -1115,3 +1171,61 @@ gitg_repository_parse_head(GitgRepository *repository)
 	return ret;
 }
 
+static gboolean
+uncommitted_get_diff(GitgRepository *self, gchar *hash, GitgRunner *diff_runner, gchar *gitpath, gboolean cached)
+{
+	gchar const *argv[] = {
+		"git",
+		"--git-dir",
+		gitpath,
+		"diff",
+		"--pretty=format:%s%n%n%b",
+		"--encoding=UTF-8",
+		NULL,
+		NULL
+	};
+
+	if (cached)
+		argv[6] = "--cached";
+
+	return gitg_runner_run(diff_runner, argv, NULL);
+}
+
+static gboolean
+normal_get_diff(GitgRepository *self, gchar *hash, GitgRunner *diff_runner, gchar *gitpath)
+{
+	gchar const *argv[] = {
+		"git",
+		"--git-dir",
+		gitpath,
+		"show",
+		"--pretty=format:%s%n%n%b",
+		"--encoding=UTF-8",
+		hash,
+		NULL
+	};
+	
+	return gitg_runner_run(diff_runner, argv, NULL);
+}
+
+gboolean
+gitg_repository_get_diff(GitgRepository *self, GitgRevision *revision, GitgRunner *diff_runner)
+{
+	gchar *hash, *gitpath;
+	gboolean rc;
+
+	gitpath = gitg_utils_dot_git_path(gitg_repository_get_path(self));
+	hash = gitg_revision_get_sha1(revision);
+
+	if (strcmp(hash, GITG_REVISION_UNSTAGED_SHA) == 0)
+		rc = uncommitted_get_diff(self, hash, diff_runner, gitpath, FALSE);
+	else if (strcmp(hash, GITG_REVISION_UNCOMMITTED_SHA) == 0)
+		rc = uncommitted_get_diff(self, hash, diff_runner, gitpath, TRUE);
+	else
+		rc = normal_get_diff(self, hash, diff_runner, gitpath);
+
+	g_free(hash);
+	g_free(gitpath);
+
+	return rc;
+}

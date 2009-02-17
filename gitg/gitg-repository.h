@@ -81,6 +81,8 @@ GSList *gitg_repository_get_refs_for_hash(GitgRepository *repository, gchar cons
 
 gchar *gitg_repository_relative(GitgRepository *repository, GFile *file);
 
+gboolean gitg_repository_get_diff(GitgRepository *repository, GitgRevision *revision, GitgRunner *diff_runner);
+
 /* Running git commands */
 gboolean gitg_repository_run_command(GitgRepository *repository, GitgRunner *runner, gchar const **argv, GError **error);
 gboolean gitg_repository_run_commandv(GitgRepository *repository, GitgRunner *runner, GError **error, ...) G_GNUC_NULL_TERMINATED;
