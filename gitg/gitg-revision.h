@@ -66,6 +66,12 @@ char gitg_revision_get_sign(GitgRevision *revision);
 GitgRevision *gitg_revision_ref(GitgRevision *revision);
 void gitg_revision_unref(GitgRevision *revision);
 
+GitgRevision *gitg_revision_unstaged_new(gchar const *parent);
+GitgRevision *gitg_revision_uncommitted_new(gchar const *parent);
+
+#define GITG_REVISION_UNSTAGED_SHA	"0000000000000000000000000000000000000000"
+#define GITG_REVISION_UNCOMMITTED_SHA	"0000000000000000000000000000000000000001"
+
 G_END_DECLS
 
 #endif /* __GITG_REVISION_H__ */

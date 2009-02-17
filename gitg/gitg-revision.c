@@ -20,6 +20,7 @@
  * Boston, MA 02111-1307, USA.
  */
 
+#include <time.h>
 #include "gitg-revision.h"
 #include "gitg-utils.h"
 
@@ -109,6 +110,18 @@ GitgRevision *gitg_revision_new(gchar const *sha,
 	rv->num_parents = num;
 	
 	return rv;
+}
+
+GitgRevision *gitg_revision_unstaged_new(gchar const *parent)
+{
+	return gitg_revision_new(GITG_REVISION_UNSTAGED_SHA, "Unknown",
+				 "Uncommitted changes, not staged in index", parent, time(NULL));
+}
+
+GitgRevision *gitg_revision_uncommitted_new(gchar const *parent)
+{
+	return gitg_revision_new(GITG_REVISION_UNCOMMITTED_SHA, "Unknown",
+				 "Uncommitted changes, staged in index", parent, time(NULL));
 }
 
 gchar const *
